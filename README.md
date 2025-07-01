@@ -1,77 +1,75 @@
 # IconHash
 
-一个简单高效的工具，用于计算网站图标(favicon)的哈希值，支持 FOFA 和 Hunter 等搜索引擎的哈希格式。
+IconHash 是一个用于计算网站图标（favicon）哈希值的工具，支持 FOFA 和 Hunter 等安全搜索引擎的哈希格式。
 
 ## 功能特点
 
-- 计算用于 FOFA 搜索的 Murmur3 哈希值
-- 计算用于 Hunter 搜索的 MD5 哈希值
-- 支持终端和网页两种使用模式
-- 内置缓存，避免重复下载
-- 支持跳过 TLS 证书验证（用于处理自签名证书或 IP 访问）
-- 资源文件嵌入到可执行程序中，无需外部依赖
+- 自动寻找网站图标（无需提供完整的 favicon URL）
+- 支持 JavaScript 重定向检测
+- 支持从文件批量处理 URL
+- 支持并发处理，提高效率
+- 简化输出格式，便于分析和处理
 
-## 项目结构
+## 安装
 
+### 从源码编译
+
+```bash
+git clone https://github.com/kN6jq/iconhash.git
+cd iconhash
+go build -o iconhash.exe cmd/iconhash/main.go
 ```
-/
-├── cmd/
-│   └── iconhash/         # 入口点
-│       ├── main.go       # 主程序
-│       ├── assets.go     # 嵌入式资源管理
-│       └── assets/       # 嵌入式静态资源
-├── internal/
-│   ├── hash/             # 哈希计算核心逻辑
-│   └── web/              # Web服务相关
-├── pkg/
-│   └── utils/            # 通用工具函数
-├── go.mod
-└── README.md
-```
+
+### 下载预编译版本
+
+从 [Releases](https://github.com/kN6jq/iconhash/releases) 页面下载最新版本。
 
 ## 使用方法
 
-### 终端模式
+```
+用法: iconhash [选项] <URL>
 
-```bash
-# 基本用法
-./iconhash http://example.com/favicon.ico
+选项:
+  -u=<url>             指定单个URL
+  -file=<filepath>      包含URL列表的文件路径
+  -output=<filepath>    输出结果的文件路径
+  -threads=<number>     并发线程数 (默认: 10)
 
-# 显式指定模式
-./iconhash -mode=terminal http://example.com/favicon.ico
-
-# 跳过 TLS 证书验证（用于 HTTPS 的 IP 地址访问）
-./iconhash -insecure=true https://192.168.1.1/favicon.ico
+示例:
+  iconhash http://example.com
+  iconhash -u=http://example.com
+  iconhash -file=urls.txt -output=results.txt
 ```
 
-### 网页模式
+## 输出格式
 
-```bash
-# 在默认端口 8080 启动网页服务器
-./iconhash -mode=web
+输出格式为简化的一行文本，包含以下信息，以竖线分隔：
 
-# 在自定义端口启动网页服务器
-./iconhash -mode=web -port=3000
-
-# 启用不安全模式（跳过 TLS 证书验证）
-./iconhash -mode=web -insecure=true
+```
+URL | 图标URL | FOFA哈希值 | Hunter哈希值
 ```
 
-然后打开浏览器，访问 `http://localhost:8080`（或您的自定义端口）。
+例如：
 
-## 构建
-
-```bash
-# 从源代码构建
-go build -o iconhash ./cmd/iconhash
+```
+http://example.com | http://example.com/favicon.ico | d41d8cd98f00b204e9800998ecf8427e | f2769a8bb67b9348a93a1a8fb2ea3f7e
 ```
 
-## 依赖项
+## 批量处理
 
-- github.com/hashicorp/golang-lru/simplelru - LRU 缓存实现
-- github.com/twmb/murmur3 - Murmur3 哈希算法实现
+创建一个包含多个URL的文本文件（每行一个URL），然后使用 `-file` 参数：
+
+```bash
+iconhash -file=urls.txt -output=results.txt
+```
+
+## 注意事项
+
+- 默认情况下，工具会自动跳过 TLS 证书验证
+- 处理大量URL时，可以使用 `-threads` 参数调整并发数
+- 输出结果可以使用 `-output` 参数保存到文件
 
 ## 许可证
 
-MIT 许可证
+MIT License
 
