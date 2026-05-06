@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	urlFlag  = flag.String("u", "", "指定favicon的URL地址")
+	urlFlag  = flag.String("u", "", "指定URL地址（网站地址或favicon直链）")
 	fileFlag = flag.String("f", "", "指定本地favicon图片路径")
 )
 
@@ -20,10 +20,11 @@ func main() {
 	flag.Usage = func() {
 		fmt.Println("用法: iconhash [选项]")
 		fmt.Println("选项:")
-		fmt.Println("  -u=<url>   指定favicon的URL地址")
+		fmt.Println("  -u=<url>   指定URL地址，支持网站地址或favicon直链")
 		fmt.Println("  -f=<file>  指定本地favicon图片路径")
 		fmt.Println("\n示例:")
-		fmt.Println("  iconhash -u=http://example.com/favicon.ico")
+		fmt.Println("  iconhash -u=http://example.com              自动发现favicon")
+		fmt.Println("  iconhash -u=http://example.com/favicon.ico  直接获取favicon")
 		fmt.Println("  iconhash -f=/path/to/favicon.ico")
 	}
 
@@ -43,6 +44,7 @@ func main() {
 
 	var data []byte
 	var source string
+	var faviconURL string
 
 	if *urlFlag != "" {
 		// 从URL获取favicon
@@ -53,6 +55,9 @@ func main() {
 			log.Fatalf("获取favicon失败: %v", err)
 		}
 		source = *urlFlag
+		if u, ok := httpClient.GetLastFaviconURL(); ok {
+			faviconURL = u
+		}
 	} else {
 		// 从本地文件读取
 		var err error
@@ -74,6 +79,9 @@ func main() {
 
 	// 输出结果
 	fmt.Printf("来源: %s\n", source)
+	if faviconURL != "" && faviconURL != source {
+		fmt.Printf("Favicon: %s\n", faviconURL)
+	}
 	fmt.Printf("FOFA Hash: %s\n", fofaHashValue)
 	fmt.Printf("Hunter Hash: %s\n", hunterHashValue)
 	fmt.Printf("MD5: %s\n", md5Hash)
