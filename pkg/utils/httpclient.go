@@ -39,6 +39,20 @@ func NewHTTPClient(insecure bool, timeout time.Duration, maxRedirs int) *HTTPCli
 // 如果提供了完整的favicon URL，直接获取
 // 否则，尝试从网站获取favicon的URL
 func (c *HTTPClient) GetFavicon(urlStr string) ([]byte, string, error) {
+	// 处理URL中的 {{favicon}} 模板
+	if strings.Contains(urlStr, "{{favicon}}") {
+		// 提取协议和主机部分，替换 {{favicon}} 为 /favicon.ico
+		u, err := url.Parse(urlStr)
+		if err == nil {
+			// 替换 {{favicon}} 部分
+			path := strings.ReplaceAll(u.Path, "{{favicon}}", "/favicon.ico")
+			// 清理双斜杠，但保留协议后的双斜杠
+			path = strings.ReplaceAll(path, "//", "/")
+			u.Path = path
+			urlStr = u.String()
+		}
+	}
+
 	// 检查是否是直接的favicon URL
 	if strings.Contains(urlStr, "favicon") || strings.HasSuffix(urlStr, ".ico") {
 		c.lastFaviconURL = urlStr
@@ -209,6 +223,18 @@ func (c *HTTPClient) GetTitle(urlStr string) string {
 	// 确保URL以http或https开头
 	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
 		urlStr = "http://" + urlStr
+	}
+
+	// 处理URL中的 {{favicon}} 模板 - 去掉这部分获取实际页面
+	if strings.Contains(urlStr, "{{favicon}}") {
+		u, err := url.Parse(urlStr)
+		if err == nil {
+			// 去掉 {{favicon}} 部分，获取基础URL
+			path := strings.ReplaceAll(u.Path, "{{favicon}}", "")
+			path = strings.TrimSuffix(path, "/")
+			u.Path = path
+			urlStr = u.String()
+		}
 	}
 
 	body, _, err := c.getWebContent(urlStr, 0)
