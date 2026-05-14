@@ -8,6 +8,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 // HTTPClient 是一个增强的HTTP客户端
@@ -213,6 +216,9 @@ func (c *HTTPClient) GetTitle(urlStr string) string {
 		return ""
 	}
 
+	// 转换编码（处理GBK/GB2312中文编码）
+	bodyStr := convertToUTF8(body)
+
 	// 提取标题
 	titlePatterns := []string{
 		`<title[^>]*>([^<]+)</title>`,
@@ -221,11 +227,63 @@ func (c *HTTPClient) GetTitle(urlStr string) string {
 
 	for _, pattern := range titlePatterns {
 		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(string(body))
+		matches := re.FindStringSubmatch(bodyStr)
 		if len(matches) > 1 {
 			return strings.TrimSpace(matches[1])
 		}
 	}
 
 	return ""
+}
+
+// convertToUTF8 转换网页内容为UTF-8编码
+func convertToUTF8(data []byte) string {
+	// 检查是否是有效的UTF-8
+	if isValidUTF8(data) {
+		return string(data)
+	}
+
+	// 尝试GBK解码
+	reader := transform.NewReader(strings.NewReader(string(data)), simplifiedchinese.GBK.NewDecoder())
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		return string(data)
+	}
+	return string(result)
+}
+
+// isValidUTF8 检查数据是否是有效的UTF-8编码
+func isValidUTF8(data []byte) bool {
+	// 简单检查：如果包含GBK特有的字节模式，可能不是UTF-8
+	// 但这不完美，更好的方法是尝试解码
+	for i := 0; i < len(data); {
+		if data[i] < 0x80 {
+			i++
+			continue
+		}
+		// 检查UTF-8多字节序列
+		if data[i] >= 0xC0 {
+			// 计算字节序列长度
+			Len := 0
+			if data[i]&0xE0 == 0xC0 {
+				Len = 2
+			} else if data[i]&0xF0 == 0xE0 {
+				Len = 3
+			} else if data[i]&0xF8 == 0xF0 {
+				Len = 4
+			} else {
+				return false
+			}
+			// 验证后续字节
+			for j := 1; j < Len && i+j < len(data); j++ {
+				if data[i+j]&0xC0 != 0x80 {
+					return false
+				}
+			}
+			i += Len
+		} else {
+			return false
+		}
+	}
+	return true
 }
