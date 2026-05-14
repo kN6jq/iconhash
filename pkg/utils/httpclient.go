@@ -35,22 +35,24 @@ func NewHTTPClient(insecure bool, timeout time.Duration, maxRedirs int) *HTTPCli
 // GetFavicon 获取网站的favicon
 // 如果提供了完整的favicon URL，直接获取
 // 否则，尝试从网站获取favicon的URL
-func (c *HTTPClient) GetFavicon(urlStr string) ([]byte, error) {
+func (c *HTTPClient) GetFavicon(urlStr string) ([]byte, string, error) {
 	// 检查是否是直接的favicon URL
 	if strings.Contains(urlStr, "favicon") || strings.HasSuffix(urlStr, ".ico") {
 		c.lastFaviconURL = urlStr
-		return c.downloadFile(urlStr)
+		data, err := c.downloadFile(urlStr)
+		return data, urlStr, err
 	}
 
 	// 否则，尝试从网站获取favicon URL
 	faviconURL, err := c.findFaviconURL(urlStr)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	c.lastFaviconURL = faviconURL
 	// 下载favicon
-	return c.downloadFile(faviconURL)
+	data, err := c.downloadFile(faviconURL)
+	return data, faviconURL, err
 }
 
 // GetLastFaviconURL 返回最后获取的favicon URL
@@ -197,4 +199,33 @@ func (c *HTTPClient) getFaviconURL(body, urlStr string) string {
 
 	// 如果没有找到favicon标签，则尝试默认路径
 	return baseURL + "/favicon.ico"
+}
+
+// GetTitle 获取网页标题
+func (c *HTTPClient) GetTitle(urlStr string) string {
+	// 确保URL以http或https开头
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		urlStr = "http://" + urlStr
+	}
+
+	body, _, err := c.getWebContent(urlStr, 0)
+	if err != nil {
+		return ""
+	}
+
+	// 提取标题
+	titlePatterns := []string{
+		`<title[^>]*>([^<]+)</title>`,
+		`<TITLE[^>]*>([^<]+)</TITLE>`,
+	}
+
+	for _, pattern := range titlePatterns {
+		re := regexp.MustCompile(pattern)
+		matches := re.FindStringSubmatch(string(body))
+		if len(matches) > 1 {
+			return strings.TrimSpace(matches[1])
+		}
+	}
+
+	return ""
 }
