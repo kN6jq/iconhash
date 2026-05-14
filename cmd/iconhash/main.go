@@ -35,13 +35,13 @@ func main() {
 	flag.Usage = func() {
 		fmt.Println("用法: iconhash [选项]")
 		fmt.Println("选项:")
-		fmt.Println("  -u=<url>   指定单个URL地址")
-		fmt.Println("  -f=<file>  指定URL列表文件")
-		fmt.Println("  -c=<num>   并发数 (默认: 10)")
+		fmt.Println("  -u <url>   指定单个URL地址")
+		fmt.Println("  -f <file>  指定URL列表文件")
+		fmt.Println("  -c <num>   并发数 (默认: 10)")
 		fmt.Println("\n示例:")
-		fmt.Println("  iconhash -u=http://example.com")
-		fmt.Println("  iconhash -f=urls.txt")
-		fmt.Println("  iconhash -f=urls.txt -c=20")
+		fmt.Println("  iconhash -u http://example.com")
+		fmt.Println("  iconhash -f urls.txt")
+		fmt.Println("  iconhash -f urls.txt -c 20")
 	}
 
 	flag.Parse()
