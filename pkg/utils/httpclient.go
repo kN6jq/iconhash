@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"bytes"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -9,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/net/html"
 	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/encoding/traditionalchinese"
+	"golang.org/x/text/encoding/korean"
 	"golang.org/x/text/transform"
 )
 
@@ -218,6 +223,21 @@ func (c *HTTPClient) getFaviconURL(body, urlStr string) string {
 	return baseURL + "/favicon.ico"
 }
 
+// supportedTitleMimeTypes 支持提取标题的MIME类型
+var supportedTitleMimeTypes = []string{
+	"text/html",
+	"application/xhtml+xml",
+	"application/xml",
+	"application/rss+xml",
+	"application/atom+xml",
+	"application/vnd.wap.xhtml+xml",
+}
+
+var (
+	reTitle      = regexp.MustCompile(`(?im)<\s*title.*>(.*?)<\s*/\s*title>`)
+	reContentType = regexp.MustCompile(`(?im)\s*charset="(.*?)"|charset=(.*?)\s*`)
+)
+
 // GetTitle 获取网页标题
 func (c *HTTPClient) GetTitle(urlStr string) string {
 	// 确保URL以http或https开头
@@ -237,79 +257,178 @@ func (c *HTTPClient) GetTitle(urlStr string) string {
 		}
 	}
 
-	body, _, err := c.getWebContent(urlStr, 0)
+	body, contentType, err := c.getWebContentWithContentType(urlStr, 0)
 	if err != nil {
 		return ""
 	}
 
-	// 转换编码（处理GBK/GB2312中文编码）
-	bodyStr := convertToUTF8(body)
+	// 解码内容（处理各种编码）
+	body = decodeData(body, contentType)
 
 	// 提取标题
-	titlePatterns := []string{
-		`<title[^>]*>([^<]+)</title>`,
-		`<TITLE[^>]*>([^<]+)</TITLE>`,
+	title := extractTitle(string(body))
+
+	return title
+}
+
+// getWebContentWithContentType 获取网页内容并返回Content-Type
+func (c *HTTPClient) getWebContentWithContentType(urlStr string, redirectCount int) ([]byte, string, error) {
+	if redirectCount > c.maxRedirs {
+		return nil, "", ErrTooManyRedirects
 	}
 
-	for _, pattern := range titlePatterns {
-		re := regexp.MustCompile(pattern)
-		matches := re.FindStringSubmatch(bodyStr)
-		if len(matches) > 1 {
-			return strings.TrimSpace(matches[1])
+	resp, err := c.client.Get(urlStr)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+
+	// 检查JS重定向
+	jsRedirect := c.checkJSRedirect(string(body), urlStr)
+	if jsRedirect != "" {
+		return c.getWebContentWithContentType(jsRedirect, redirectCount+1)
+	}
+
+	return body, contentType, nil
+}
+
+// extractTitle 从HTML中提取标题
+func extractTitle(htmlContent string) string {
+	// 尝试用DOM方式解析
+	titleDom, err := getTitleWithDom(htmlContent)
+	if err != nil {
+		// 回退到正则
+		for _, match := range reTitle.FindAllString(htmlContent, -1) {
+			title := trimTitleTags(match)
+			title = html.UnescapeString(strings.TrimSpace(title))
+			return title
+		}
+		return ""
+	}
+
+	// 用DOM方式提取
+	title := renderNode(titleDom)
+	title = trimTitleTags(title)
+	title = html.UnescapeString(strings.TrimSpace(title))
+
+	// 清理换行符等
+	title = strings.Trim(title, "\n\t\v\f\r")
+	title = strings.ReplaceAll(title, "\n", " ")
+	title = strings.ReplaceAll(title, "\t", " ")
+	title = strings.ReplaceAll(title, "\r", " ")
+
+	return strings.TrimSpace(title)
+}
+
+// getTitleWithDom 使用DOM方式提取标题
+func getTitleWithDom(htmlContent string) (*html.Node, error) {
+	var title *html.Node
+	var crawler func(*html.Node)
+	crawler = func(node *html.Node) {
+		if node.Type == html.ElementNode && node.Data == "title" {
+			title = node
+			return
+		}
+		for child := node.FirstChild; child != nil && title == nil; child = child.NextSibling {
+			crawler(child)
 		}
 	}
 
-	return ""
+	htmlDoc, err := html.Parse(bytes.NewReader([]byte(htmlContent)))
+	if err != nil {
+		return nil, err
+	}
+	crawler(htmlDoc)
+	if title != nil {
+		return title, nil
+	}
+	return nil, fmt.Errorf("title not found")
 }
 
-// convertToUTF8 转换网页内容为UTF-8编码
-func convertToUTF8(data []byte) string {
-	// 检查是否是有效的UTF-8
-	if isValidUTF8(data) {
-		return string(data)
+// renderNode 渲染HTML节点为字符串
+func renderNode(n *html.Node) string {
+	var buf bytes.Buffer
+	w := io.Writer(&buf)
+	html.Render(w, n)
+	return buf.String()
+}
+
+// trimTitleTags 去掉title标签
+func trimTitleTags(title string) string {
+	begin := strings.Index(title, ">")
+	end := strings.Index(title, "</")
+	if end < 0 || begin < 0 || end <= begin {
+		return title
+	}
+	return title[begin+1 : end]
+}
+
+// decodeData 根据Content-Type解码内容
+func decodeData(data []byte, contentType string) []byte {
+	contentType = strings.ToLower(contentType)
+
+	// 先检查HTTP头的Content-Type
+	if strings.Contains(contentType, "charset=gb2312") || strings.Contains(contentType, "charset=gbk") {
+		return decodeGBK(data)
+	}
+	if strings.Contains(contentType, "euc-kr") {
+		return decodeKorean(data)
+	}
+	if strings.Contains(contentType, "big5") {
+		return decodeBig5(data)
 	}
 
-	// 尝试GBK解码
-	reader := transform.NewReader(strings.NewReader(string(data)), simplifiedchinese.GBK.NewDecoder())
+	// 再检查HTML中的meta charset
+	match := reContentType.FindSubmatch(data)
+	if len(match) > 0 {
+		for i := 1; i < len(match); i++ {
+			charset := string(match[i])
+			charset = strings.ToLower(strings.TrimSpace(charset))
+			if strings.Contains(charset, "gb2312") || strings.Contains(charset, "gbk") {
+				return decodeGBK(data)
+			}
+			if strings.Contains(charset, "big5") {
+				return decodeBig5(data)
+			}
+		}
+	}
+
+	return data
+}
+
+// decodeGBK 解码GBK为UTF-8
+func decodeGBK(data []byte) []byte {
+	reader := transform.NewReader(bytes.NewReader(data), simplifiedchinese.GBK.NewDecoder())
 	result, err := io.ReadAll(reader)
 	if err != nil {
-		return string(data)
+		return data
 	}
-	return string(result)
+	return result
 }
 
-// isValidUTF8 检查数据是否是有效的UTF-8编码
-func isValidUTF8(data []byte) bool {
-	// 简单检查：如果包含GBK特有的字节模式，可能不是UTF-8
-	// 但这不完美，更好的方法是尝试解码
-	for i := 0; i < len(data); {
-		if data[i] < 0x80 {
-			i++
-			continue
-		}
-		// 检查UTF-8多字节序列
-		if data[i] >= 0xC0 {
-			// 计算字节序列长度
-			Len := 0
-			if data[i]&0xE0 == 0xC0 {
-				Len = 2
-			} else if data[i]&0xF0 == 0xE0 {
-				Len = 3
-			} else if data[i]&0xF8 == 0xF0 {
-				Len = 4
-			} else {
-				return false
-			}
-			// 验证后续字节
-			for j := 1; j < Len && i+j < len(data); j++ {
-				if data[i+j]&0xC0 != 0x80 {
-					return false
-				}
-			}
-			i += Len
-		} else {
-			return false
-		}
+// decodeBig5 解码Big5为UTF-8
+func decodeBig5(data []byte) []byte {
+	reader := transform.NewReader(bytes.NewReader(data), traditionalchinese.Big5.NewDecoder())
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		return data
 	}
-	return true
+	return result
+}
+
+// decodeKorean 解码Korean为UTF-8
+func decodeKorean(data []byte) []byte {
+	reader := transform.NewReader(bytes.NewReader(data), korean.EUCKR.NewDecoder())
+	result, err := io.ReadAll(reader)
+	if err != nil {
+		return data
+	}
+	return result
 }
